@@ -1,0 +1,26 @@
+.global-layout {
+    height: 100vh;
+}
+
+.home-content {
+    display: flex;
+    justify-content: center;
+    padding: 50px 50px;
+    height: 100%;
+}
+
+.home-content > div {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: 30%;
+    height: 100%;
+}
+
+.home-content input {
+    width: 15rem;
+}
+
+.home-content button {
+    width: 15rem;
+}
