@@ -3,36 +3,33 @@ import {
   useState,
   useRef,
   useEffect,
-  createRef,
-  Fragment,
-  KeyboardEventHandler
 } from 'react';
+import {
+  minifyDelta,
+  Filesystem,
+  IFileTreeNode,
+} from './utils';
 import { Redirect, RouteComponentProps } from 'react-router-dom';
 import ResizePanel from 'react-resize-panel';
 import MonacoEditor from '@monaco-editor/react';
 import { editor as mEditor } from 'monaco-editor';
 import Logoot from "logoot-crdt";
 import { XTerm } from 'xterm-for-react';
-import { Terminal } from 'xterm';
-import { Input } from 'antd';
 import { FitAddon } from 'xterm-addon-fit';
+import { Dracula } from 'xterm-theme';
 import useWebSocket from 'react-use-websocket';
+import { Tree } from 'antd';
 import '../../css/main.css';
 import '../../css/session.css';
 
-// const styles = {
-  // root: {
-    // fontSize: 15,
-    // width: "100%",
-    // height: "100%",
-    // fontFamily: '"Fira code", "Fira Mono", monospace',
-    // ...(theme.plain as any)
-  // }
-// }
+const { DirectoryTree } = Tree;
+
+const fsFilterRegex = /\/tmp\/session[0-9a-z\-]+\//
 
 enum MsgTypes {
   Stdout = "STDOUT",
   Stdin = "STDIN",
+  FSChange = "FS_CHANGE",
 }
 
 enum TermSignals {
@@ -43,57 +40,49 @@ interface IEditorChanges {
   [index: number]: any;
 }
 
-function minifyDelta(delta: any) {
-  const res: any = {
-    t: delta.type.slice(0, 1),
-    v: delta.value,
-    p: []
-  }
-
-  for (const pos of delta.position) {
-    res.p.push({
-      i: pos.int,
-      s: pos.site,
-      c: pos.clock
-    });
-  }
-
-  return res;
-}
-
 type SessionProps = RouteComponentProps<{
   sessionid: string
 }>;
 
 const enc = new TextEncoder();
+const fit = new FitAddon();
 
 export const Session: FC<SessionProps> = (props: SessionProps) => {
   const [code, setCode] = useState<string>("");
-  const [stdout, setStdout] = useState<string>("");
   const [ready, setReady] = useState<boolean>(false);
   const [badCode, setBadCode] = useState<boolean>(false);
   const [command, setCommand] = useState<string>("");
-  const [prevEnter, setPrevEnter] = useState<number>(Date.now());
-  const cmdInputRef = useRef<Input>(null);
+  const [backspacable, setBackspacable] = useState<number>(0);
+  const [fileTree, setFileTree] = useState<IFileTreeNode[]>([]);
   const logootRef = useRef(new Logoot("1"));
+  const filesystem = useRef(new Filesystem());
   const editorChanges = useRef<any[]>([]);
-  const termRef = createRef<Terminal>();
   const terminalRef = useRef<XTerm>(null);
 
-  const recvMsgHandlers: Record<string, any> = {
+  const recvMsgHandlers: Record<string, (details: any) => void> = {
     [MsgTypes.Stdout]: (details: {
       output: string
     }) => {
-      let newStdout = stdout + details.output;
       if (terminalRef.current !== null) {
         const encoded = enc.encode(details.output);
         terminalRef.current.terminal.write(encoded);
+        if (backspacable > 0) {
+          setBackspacable(0);
+        }
       }
-      if (newStdout.length > 5000) {
-        newStdout = newStdout.slice(newStdout.length - 5000);
-      }
+    },
 
-      setStdout(newStdout);
+    [MsgTypes.FSChange]: (details: {
+      type: string,
+      oldPath: string,
+      newPath: string,
+      isLeaf: boolean
+    }) => {
+      details.oldPath = details.oldPath.replace(fsFilterRegex, "");
+      details.newPath = details.newPath.replace(fsFilterRegex, "");
+      filesystem.current.handle(details);
+      const tree = filesystem.current.toObject();
+      setFileTree(tree);
     },
   }
 
@@ -146,9 +135,6 @@ export const Session: FC<SessionProps> = (props: SessionProps) => {
   useEffect(() => {
     logootRef.current.on("operation", (op: any) => editorChanges.current.push(op));
 
-    if (terminalRef.current !== null) {
-      terminalRef.current.terminal.write("interview:~$ ")
-    }
 
     const editorUpdateInterval = setInterval(() => {
       if (editorChanges.current.length === 0) return;
@@ -174,22 +160,21 @@ export const Session: FC<SessionProps> = (props: SessionProps) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (terminalRef.current !== null) {
+      fit.fit();
+      terminalRef.current.terminal.write("interview:~$ ")
+      if (terminalRef.current.terminalRef.current !== null) {
+        new ResizeObserver(() => {
+          fit.fit();
+        }).observe(terminalRef.current.terminalRef.current); 
+      }
+    }
+  }, [terminalRef.current]);
+
 
   const handleTerminalKey = (e: KeyboardEvent): boolean => {
-    if (e.key.includes("Arrow")) return false;
-
-    // if (e.key === "c" && e.ctrlKey) return false;
-
-    // if (e.key === "Enter") {
-      // if (Date.now() - prevEnter > 1000) {
-        // setPrevEnter(Date.now());
-      // } else {
-        // return false;
-      // }
-    // }
-
-
-    return true
+    return !e.key.includes("Arrow")
   }
 
   const keyHandler = (e: {
@@ -197,27 +182,36 @@ export const Session: FC<SessionProps> = (props: SessionProps) => {
     domEvent: KeyboardEvent
   }) => {
     const ev = e.domEvent;
-    console.log(ev);
     if (ev.key === "Enter") {
       if (terminalRef.current !== null) {
         terminalRef.current.terminal.write('\r\n');
+        if (command.length > 0 && command[command.length - 1] === "\\") {
+          setCommand(command.slice(0, command.length - 1));
+          setBackspacable(0);
+          terminalRef.current.terminal.write("> ");
+          return;
+        }
       }
+
       sendMsgHandlers[MsgTypes.Stdin]({
         input: command
       });
       setCommand("");
-      // if (Date.now() - prevEnter > 2000) {
-        // setPrevEnter(Date.now());
-        // cmdInput();
-      // }
     } else if (ev.key === "c" && ev.ctrlKey) {
       setCommand("");
       sendMsgHandlers[MsgTypes.Stdin]({
         input: TermSignals.SIGINT
       });
+    } else if (e.key.charCodeAt(0) === 127) {
+      if (terminalRef.current !== null && backspacable > 0) {
+        setCommand(command.slice(0, command.length - 1));
+        setBackspacable(backspacable - 1);
+        terminalRef.current.terminal.write("\b \b");
+      }
     } else if (ev.key.length === 1) {
       if (terminalRef.current !== null) {
         setCommand(command + ev.key);
+        setBackspacable(backspacable + 1);
         terminalRef.current.terminal.write(ev.key);
       }
     }
@@ -234,9 +228,17 @@ export const Session: FC<SessionProps> = (props: SessionProps) => {
   return (
     <div className='container'>
       <div className="workspace-container">
-        <ResizePanel direction='e' style={{ flexGrow: '1' }} handleClass="resize-handler">
+        <ResizePanel
+          direction='e'
+          style={{ flexGrow: '1' }}
+          handleClass="resize-handler"
+        >
           <div className="dtree-container">
             <p>Directory Tree</p>
+            <DirectoryTree
+              multiple
+              treeData={fileTree}
+            />
           </div>
         </ResizePanel>
         <div className="editor-container">
@@ -252,24 +254,25 @@ export const Session: FC<SessionProps> = (props: SessionProps) => {
           />
 
           <div className="terminal-container">
-            <XTerm
-              className="terminal"
-              options={{
-                rows: 20,
-                rendererType: "canvas",
-              }}
-              onKey={keyHandler}
-              customKeyEventHandler={handleTerminalKey}
-              ref={terminalRef}
-            />
-            {/*
-            <Input
-              className="cmdin"
-              ref={cmdInputRef}
-              onPressEnter={cmdInput}
-              placeholder="Enter terminal command here and press ENTER..."
-            />
-            */}
+            <ResizePanel
+              direction='n'
+              className="terminal-resizer"
+              style={{ flexGrow: '1' }}
+              handleClass="resize-handler-horizontal"
+            >
+              <XTerm
+                className="terminal"
+                options={{
+                  rows: 10,
+                  rendererType: "canvas",
+                  theme: Dracula,
+                }}
+                onKey={keyHandler}
+                addons={[fit]}
+                customKeyEventHandler={handleTerminalKey}
+                ref={terminalRef}
+              />
+            </ResizePanel>
           </div>
         </div>
       </div>
