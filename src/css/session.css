@@ -1,3 +1,17 @@
+p {
+    margin: 0;
+    padding: 0;
+    margin-block-start: 0;
+    margin-block-end: 0;
+    margin-inline-start: 0;
+    margin-inline-end: 0;
+}
+
+div {
+    margin: 0;
+    padding: 0;
+}
+
 .workspace-container {
     flex-grow: 3;
     display: flex;
@@ -25,6 +39,7 @@
 }
 
 .editor-container {
+    background-color: #1e1e1e;
     overflow: hidden;
     flex-grow: 2;
     width: 100%;
@@ -39,6 +54,17 @@
     height: 100%;
     top: 0;
     left: 0;
+}
+
+.theme-select {
+    width: 200px;
+}
+
+.topbar {
+    display: flex;
+    flex-direction: row;
+    justify-content: left;
+    width: 100%;
 }
 
 .terminal-container {
@@ -74,4 +100,24 @@
     min-height: 20vh;
     background: #000000;
     color: #ffffff;
+}
+
+.video-container {
+    width: 400px;
+    height: 224px;
+    background-color: black;
+}
+
+.local-video {
+    z-index: 500;
+    position: absolute;
+    top: 0;
+    right: 0;
+}
+
+.remote-video {
+    z-index: 499;
+    position: absolute;
+    top: 226px;
+    right: 0;
 }

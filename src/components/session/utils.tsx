@@ -120,9 +120,14 @@ export class Filesystem {
   nodes: Map<string, FileTreeNode>;
 
   constructor() {
-    this.tree = new FileTreeNode('', '', false);
+    this.tree = new FileTreeNode("Interview", '', false);
     this.nodes = new Map();
     this.nodes.set('', this.tree);
+  }
+
+  isLeaf(key: string): boolean {
+    const node = this.nodes.get(key);
+    return node !== undefined && node.isLeaf;
   }
 
   static getParent(key: string): string {
@@ -134,8 +139,8 @@ export class Filesystem {
     return split[split.length - 1];
   }
 
-  toObject(): IFileTreeNode[] {
-    return this.tree.toObject().children || [];
+  toObject(): IFileTreeNode {
+    return this.tree.toObject();
   }
 
   handle(event: IFSEvent) {
